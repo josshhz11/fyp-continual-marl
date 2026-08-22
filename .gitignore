@@ -1,0 +1,8 @@
+experiments/results/*/raw/
+.venv/
+venv/
+__pycache__/
+*.pyc
+wandb/
+*.ckpt
+*.pt
