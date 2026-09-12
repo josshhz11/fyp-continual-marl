@@ -34,6 +34,9 @@ metrics.json:
 - challenge_task (str: one of "preference_shift", "team_churn",
   "compound", "cross_episode")
 - seed (int)
+- change_depth (str: one of "early", "mid", "late", "n/a" — n/a for
+  cross_episode and any task without an injected preference/churn
+  event)
 
 This schema is the contract between src/eval/ and experiments/results/ —
 any new metric must be added here before being logged.
