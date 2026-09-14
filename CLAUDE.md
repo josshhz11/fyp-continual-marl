@@ -65,6 +65,30 @@ Audited bugs relevant to this project:
   judge-scored preference/quality metrics to rank conditions,
   including baseline comparisons and ablations.
 
+Own findings from the single-workflow smoke test (not from the audit
+list, but relevant to the platform decision):
+- `examples/getting_started/hello_manager_agent.py` never registers a
+  real worker team for the ICAAP scenario — `workflow.agents` is empty
+  for that scenario (its team lives in the separate `team.py`, unlike
+  `workflow.py`), so the example silently runs with 0 registered
+  agents. It doesn't crash, but its completion-rate output is
+  meaningless. Use `examples.run_examples.run_demo(...)` instead — it
+  correctly loads each scenario's team timeline.
+- The ICAAP scenario's folder is `examples/end_to_end_examples/icap/`
+  but its registry key in `examples/scenarios.py` is `"icaap"`, not
+  `"icap"` — easy to trip over when scripting runs.
+- `run_demo`'s/`create_manager`'s `model_name` argument only controls
+  the *manager* agent's model. The rubric/LLM-judge evaluation pipeline
+  (`manager_agent_gym/core/evaluation/validation_rules.py`) has its own
+  independent hardcoded default of `model: str = "o3"`, with no
+  parameter on `run_demo` to redirect it. A single 20-timestep run of
+  one workflow with `model_name="gpt-4o-mini"` still hit `o3`'s 30,000
+  TPM org rate limit repeatedly from evaluation calls alone — this
+  compounds ML-036 (same `o3`-judge pipeline) and means per-run API
+  cost/rate-limit exposure is higher than the manager model choice
+  alone would suggest; budget planning must account for the evaluator
+  cost separately from the manager cost.
+
 ## Current Focus
 Phase 1 is deliberately scoped to a single-workflow smoke test of
 external/manager_agent_gym (confirming environment/tooling work) —
