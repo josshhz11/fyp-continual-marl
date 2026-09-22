@@ -1,3 +1,4 @@
 [submodule "external/manager_agent_gym"]
 	path = external/manager_agent_gym
-	url = https://github.com/DeepFlow-research/manager_agent_gym
+	url = https://github.com/josshhz11/manager_agent_gym
+	branch = fyp/ma-gym-fixes
