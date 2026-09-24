@@ -37,6 +37,13 @@ metrics.json:
 - change_depth (str: one of "early", "mid", "late", "n/a" — n/a for
   cross_episode and any task without an injected preference/churn
   event)
+- verified_completion_rate (float, 0-1) — goal_completion_rate re-scored by
+  src/eval/completion_verifier.py, which flags COMPLETED tasks that have no
+  agent/start/output, empty output, self-reported non-execution, or
+  placeholder content (MA-Gym audit ML-003/009/011/015). Log it next to
+  goal_completion_rate; report both.
+- completion_flags (dict[str, int]) — count of completed tasks per flag from
+  the same verifier.
 
 This schema is the contract between src/eval/ and experiments/results/ —
 any new metric must be added here before being logged.
