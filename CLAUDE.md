@@ -10,7 +10,7 @@ Supervisor: A/P Stefano Vittorino Albrecht
 The MA-Gym paper identifies four foundational challenges in workflow orchestration; this project targets challenges (2) multi-objective optimization under shifting stakeholder preferences and (3) coordination and planning in ad hoc teams, since MA-Gym names these as open but does not attempt a learned or continual solution to either. Following the shift in continual RL and inference-time adaptation literature away from gradient-based retraining, the architectural stance is to keep the manager LLM frozen and place learned/adaptive components (a lightweight selection layer, then episodic memory) around it, rather than fine-tuning the LLM or learning a policy over its full raw action space.
 
 ## Phase Status
-- Phase 1 (Baseline Reproduction): NOT STARTED
+- Phase 1 (Baseline Reproduction): IN PROGRESS — single-workflow smoke test done (ICAAP); MA-Gym fixes underway, see external/manager_agent_gym/fixes/PROPOSED_FIXES_SUMMARY.md (Fix 1 and Fix 4 in Phase A)
 - Phase 2 (Lightweight Learned Selection Layer): NOT STARTED
 - Phase 3 (Episodic Memory for Continual Adaptation): NOT STARTED
 - Phase 4 (Zero-Shot Generalization, stretch): NOT STARTED
@@ -29,7 +29,13 @@ The MA-Gym paper identifies four foundational challenges in workflow orchestrati
   something that may have already been tried.
 
 ## Repo Conventions
-- external/manager_agent_gym is a git submodule — do not edit it directly.
+- external/manager_agent_gym is a git submodule pointing at our fork
+  (josshhz11/manager_agent_gym, branch fyp/ma-gym-fixes). Edit it only for the
+  fixes tracked in external/manager_agent_gym/fixes/PROPOSED_FIXES_SUMMARY.md,
+  one commit per fix; never edit the upstream repo directly.
+- Log every scoping, architecture, method or convention decision to
+  notes/DECISIONS.md with /log-decision at the time it is made (include the
+  evidence), not afterwards.
 - experiments/results/*/raw/ is gitignored — never commit raw logs.
 - Every experiment run must get an entry in experiments/results/INDEX.md.
 
