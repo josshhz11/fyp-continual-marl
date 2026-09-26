@@ -5,12 +5,14 @@ from uuid import uuid4
 import pytest
 
 from eval.completion_verifier import (
+    BLANK_FIELDS,
     EMPTY_OUTPUT,
     NEVER_STARTED,
     NO_ASSIGNED_AGENT,
     NO_OUTPUT_RESOURCES,
     PLACEHOLDER_CONTENT,
     SELF_REPORTED_NON_EXECUTION,
+    TEMPLATE_RESOURCE,
     verify_workflow_summary,
 )
 
@@ -103,6 +105,22 @@ def test_placeholder_content_is_flagged(body: str) -> None:
     assert PLACEHOLDER_CONTENT in _flags_for(_task(res), res)
 
 
+def _verdict(task: dict, resource: dict):
+    return verify_workflow_summary(_summary([task], [resource])).verdicts[0]
+
+
+def test_resource_named_template_is_review_only() -> None:
+    res = _resource(GOOD, name="Model Inventory Template")
+    verdict = _verdict(_task(res), res)
+    assert verdict.review_flags == [TEMPLATE_RESOURCE]
+    assert verdict.verified  # a review flag does not fail verification
+
+
+def test_template_word_in_body_only_is_not_flagged() -> None:
+    res = _resource("We reviewed the template used last year. " + GOOD)
+    assert _flags_for(_task(res), res) == []
+
+
 def test_markdown_links_and_citations_are_not_placeholders() -> None:
     res = _resource("See [the contract](https://example.com) and reference [1]. " + GOOD)
     assert _flags_for(_task(res), res) == []
@@ -127,7 +145,11 @@ def test_composites_are_excluded_and_rates_use_leaves() -> None:
 def test_metrics_payload_shape() -> None:
     res = _resource(GOOD)
     metrics = verify_workflow_summary(_summary([_task(res)], [res])).to_metrics()
-    assert set(metrics) == {"verified_completion_rate", "completion_flags"}
+    assert set(metrics) == {
+        "verified_completion_rate",
+        "completion_flags",
+        "completion_review_flags",
+    }
 
 
 def test_empty_workflow_does_not_divide_by_zero() -> None:
@@ -162,3 +184,60 @@ def test_accepts_real_engine_summary_shape() -> None:
     assert report.engine_completed == 2
     assert report.verified_completed == 1
     assert report.flagged_completions[0].name == "phantom"
+
+
+# Excerpt of a real ICAAP deliverable (blank form) that an earlier version missed.
+REAL_BLANK_FORM = """# Access Control Documentation Template
+
+## 1. Document Information
+- Document Name/ID:
+- Version:
+- Date:
+
+## 2. Access Roles
+| Role | Description | Individuals/Groups |
+|------|-------------|--------------------|
+| Data Owner | Responsible for data classification | |
+| Data Steward | Manages day-to-day access | |
+
+## 5. Periodic Review
+- Frequency (e.g., quarterly, annually):
+- Reviewer(s):
+"""
+
+
+def test_real_blank_form_is_flagged_for_blank_fields() -> None:
+    res = _resource(REAL_BLANK_FORM, name="Access Control Documentation")
+    assert BLANK_FIELDS in _flags_for(_task(res), res)
+
+
+def test_filled_bullets_and_list_intros_are_not_blank_fields() -> None:
+    body = (
+        "- Owner: Data Steward\n- Steps:\n    - extract\n    - load\n"
+        "1. For every transfer, apply:\n   - reconcile counts\n" + GOOD
+    )
+    res = _resource(body)
+    assert _flags_for(_task(res), res) == []
+
+
+def test_single_blank_label_is_tolerated() -> None:
+    res = _resource("- Notes:\n\nAnalysis follows. " + GOOD)
+    assert BLANK_FIELDS not in _flags_for(_task(res), res)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "| Model | Owner |\n|---|---|\n| ExamplePD01 | John Doe |",
+        "Owner: Jane Smith. " + GOOD,
+        "This template should be tailored and populated for each asset. " + GOOD,
+    ],
+)
+def test_dummy_data_wording_is_flagged(body: str) -> None:
+    res = _resource(body)
+    assert PLACEHOLDER_CONTENT in _flags_for(_task(res), res)
+
+
+def test_the_word_examples_is_not_a_placeholder() -> None:
+    res = _resource("Examples of controls include reconciliation. " + GOOD)
+    assert _flags_for(_task(res), res) == []

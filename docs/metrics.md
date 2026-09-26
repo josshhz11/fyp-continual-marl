@@ -38,12 +38,18 @@ metrics.json:
   cross_episode and any task without an injected preference/churn
   event)
 - verified_completion_rate (float, 0-1) — goal_completion_rate re-scored by
-  src/eval/completion_verifier.py, which flags COMPLETED tasks that have no
-  agent/start/output, empty output, self-reported non-execution, or
-  placeholder content (MA-Gym audit ML-003/009/011/015). Log it next to
-  goal_completion_rate; report both.
-- completion_flags (dict[str, int]) — count of completed tasks per flag from
-  the same verifier.
+  src/eval/completion_verifier.py. A COMPLETED task only counts as verified if
+  it has an assigned agent, a start, non-empty output, no self-reported
+  non-execution, no placeholder/dummy content and no blank form fields (MA-Gym
+  audit ML-003/009/011/015). Log it next to goal_completion_rate; report both.
+- completion_flags (dict[str, int]) — count of completed tasks per failing
+  check from the same verifier.
+- completion_review_flags (dict[str, int]) — checks that need a human look but
+  do not reduce verified_completion_rate (currently: template_resource, a
+  deliverable named as a template).
+
+constraint_violations is null until the constraint scoring fix (Fix 6) lands;
+src/eval/run_metrics.py writes null rather than an unreliable engine figure.
 
 This schema is the contract between src/eval/ and experiments/results/ —
 any new metric must be added here before being logged.
