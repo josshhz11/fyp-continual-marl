@@ -8,8 +8,8 @@ deterministic checks, without importing or modifying the engine.
 
 Scope and limits: these are heuristics. A task with no flags is "not
 contradicted by the checks below", not proven adequate. Placeholder detection
-only catches bracketed/marker-style stubs, not a template whose fields were
-left blank in prose.
+only catches bracketed/marker-style stubs; a template whose fields were left
+blank in prose is caught only when the resource is *named* a template.
 """
 
 from __future__ import annotations
@@ -27,7 +27,10 @@ NO_OUTPUT_RESOURCES = "no_output_resources"
 EMPTY_OUTPUT = "empty_output"
 SELF_REPORTED_NON_EXECUTION = "self_reported_non_execution"
 PLACEHOLDER_CONTENT = "placeholder_content"
+BLANK_FIELDS = "blank_fields"
+TEMPLATE_RESOURCE = "template_resource"
 
+# Hard flags: objective defects. A task with any of these is not verified.
 ALL_FLAGS = (
     NO_ASSIGNED_AGENT,
     NEVER_STARTED,
@@ -35,7 +38,11 @@ ALL_FLAGS = (
     EMPTY_OUTPUT,
     SELF_REPORTED_NON_EXECUTION,
     PLACEHOLDER_CONTENT,
+    BLANK_FIELDS,
 )
+
+# Review flags: worth a human look, but do not affect the verified rate.
+REVIEW_FLAGS = (TEMPLATE_RESOURCE,)
 
 # Phrases a worker writes when it says it did not actually do the work (ML-011).
 _NON_EXECUTION = re.compile(
@@ -47,9 +54,42 @@ _NON_EXECUTION = re.compile(
 _PLACEHOLDER = re.compile(
     r"\[[^\]\n]{0,40}\b(?:insert|your|enter|date|name|company|address|amount|signature|title|tbd|todo|placeholder)\b"
     r"[^\]\n]{0,40}\](?!\()"
-    r"|\bTBD\b|lorem ipsum|<insert[^>\n]*>|\{\{[^}\n]*\}\}",
+    r"|\bTBD\b|lorem ipsum|<insert[^>\n]*>|\{\{[^}\n]*\}\}"
+    # dummy names and "fill this in" wording seen in real output
+    r"|\bJohn Doe\b|\bJane (?:Doe|Smith)\b|(?-i:\bExample[A-Z0-9]\w*)"
+    r"|should be (?:tailored|populated|customi[sz]ed)|to be (?:filled|completed|populated)",
     re.IGNORECASE,
 )
+
+# A bullet whose label has no value, e.g. "- Version:". Blank only when the
+# next line is not a deeper-indented child (which would make it a list intro).
+_BLANK_LABEL = re.compile(r"^(\s*)[-*]\s+[A-Za-z][^:\n]{0,60}:\s*$")
+_MIN_BLANK_FIELDS = 2
+
+
+def _count_blank_fields(text: str) -> int:
+    lines = text.split("\n")
+    blanks = 0
+    for i, line in enumerate(lines):
+        m = _BLANK_LABEL.match(line)
+        if not m:
+            continue
+        nxt = next((x for x in lines[i + 1 :] if x.strip()), "")
+        if len(nxt) - len(nxt.lstrip()) <= len(m.group(1)):
+            blanks += 1
+        # a deeper-indented next line means this label introduces a list
+    for line in lines:
+        s = line.strip()
+        if s.startswith("|") and s.endswith("|"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if any(cells) and not all(set(c) <= set("-: ") for c in cells) and "" in cells:
+                blanks += 1
+    return blanks
+
+# A deliverable titled "... Template" is often a blank form rather than finished
+# work (observed on real ICAAP output), but a task may legitimately ask for one,
+# so this is a review flag only.
+_TEMPLATE_NAME = re.compile(r"\btemplates?\b", re.IGNORECASE)
 
 
 @dataclass
@@ -57,6 +97,7 @@ class TaskVerdict:
     task_id: str
     name: str
     flags: list[str] = field(default_factory=list)
+    review_flags: list[str] = field(default_factory=list)
 
     @property
     def verified(self) -> bool:
@@ -92,11 +133,17 @@ class CompletionReport:
         counts = Counter(f for v in self.verdicts for f in v.flags)
         return {flag: counts.get(flag, 0) for flag in ALL_FLAGS}
 
+    @property
+    def review_flag_counts(self) -> dict[str, int]:
+        counts = Counter(f for v in self.verdicts for f in v.review_flags)
+        return {flag: counts.get(flag, 0) for flag in REVIEW_FLAGS}
+
     def to_metrics(self) -> dict[str, Any]:
         """Fields to log alongside goal_completion_rate (see docs/metrics.md)."""
         return {
             "verified_completion_rate": self.verified_completion_rate,
             "completion_flags": self.flag_counts,
+            "completion_review_flags": self.review_flag_counts,
         }
 
 
@@ -135,6 +182,11 @@ def _verify_task(
         flags.append(SELF_REPORTED_NON_EXECUTION)
     if _PLACEHOLDER.search("\n".join(r.get("content") or "" for r in outputs)):
         flags.append(PLACEHOLDER_CONTENT)
+    body = "\n".join(r.get("content") or "" for r in outputs)
+    if _count_blank_fields(body) >= _MIN_BLANK_FIELDS:
+        flags.append(BLANK_FIELDS)
+    if any(_TEMPLATE_NAME.search(r.get("name") or "") for r in outputs):
+        verdict.review_flags.append(TEMPLATE_RESOURCE)
 
     return verdict
 
@@ -176,8 +228,11 @@ def main(argv: list[str] | None = None) -> None:
     print(f"engine completed:           {report.engine_completed} ({report.engine_completion_rate:.1%})")
     print(f"verified completed:         {report.verified_completed} ({report.verified_completion_rate:.1%})")
     print(f"flag counts:                {report.flag_counts}")
-    for v in report.flagged_completions:
-        print(f"  - {v.name} [{v.task_id}]: {', '.join(v.flags)}")
+    print(f"review flag counts:         {report.review_flag_counts}")
+    for v in report.verdicts:
+        status = "FLAGGED " if v.flags else "verified"
+        extra = f" | review: {', '.join(v.review_flags)}" if v.review_flags else ""
+        print(f"  - {status} {v.name}: {', '.join(v.flags) or '-'}{extra}")
 
 
 if __name__ == "__main__":
