@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .completion_verifier import verify_workflow_summary
+from .constraint_aggregation import hard_zero_gate
 
 CONDITIONS = (
     "cot",
@@ -46,6 +47,62 @@ def find_final_summary(run_dir: str | Path) -> Path:
     return candidates[0]
 
 
+def find_final_evaluation(run_dir: str | Path) -> Path | None:
+    """The final_evaluation_*.json the engine writes, if evaluation ran at all."""
+    candidates = list(Path(run_dir, "evaluation_outputs").glob("final_evaluation_*.json"))
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def compute_constraint_violations(
+    run_dir: str | Path, *, evaluator_name: str = "constraint_adherence"
+) -> dict[str, Any] | None:
+    """Re-aggregates the named evaluator's rubrics correctly (Fix 6), instead
+    of trusting the engine's own weighted-by-max output for it.
+
+    Returns None if no evaluation output exists for this run, or the named
+    evaluator didn't run at all (e.g. evaluation was disabled) — the caller
+    logs null rather than a number with no basis. If the evaluator ran but
+    produced zero rubric results, returns a populated dict with
+    violation_count=0 rather than None, since that's a real (if vacuous)
+    answer, not a missing one.
+    """
+    path = find_final_evaluation(run_dir)
+    if path is None:
+        return None
+    with open(path, encoding="utf-8") as f:
+        final_eval = json.load(f)
+    group = next(
+        (r for r in final_eval.get("evaluation_results", []) if r.get("evaluator_name") == evaluator_name),
+        None,
+    )
+    if group is None:
+        return None
+    rubrics = group.get("rubric_scores", [])
+    # Derived from score/max_score rather than trusting a normalized_score
+    # field to be present — MA-Gym's own output does carry one, but nothing
+    # here should depend on that.
+    gate_input = [
+        {"name": r["name"], "normalized_score": (r["score"] / r["max_score"]) if r["max_score"] else 0.0}
+        for r in rubrics
+    ]
+    by_rubric = {r["name"]: bool(r["score"] < r["max_score"]) for r in rubrics}
+    return {
+        "by_rubric_violated": by_rubric,
+        "violation_count": sum(by_rubric.values()),
+        "correctly_aggregated_score": hard_zero_gate(gate_input),
+        "engine_reported_score": next(
+            (
+                r.get("aggregated_score")
+                for r in final_eval.get("evaluation_results", [])
+                if r.get("evaluator_name") == evaluator_name
+            ),
+            None,
+        ),
+    }
+
+
 def build_run_metrics(
     run_dir: str | Path,
     *,
@@ -66,8 +123,7 @@ def build_run_metrics(
 
     return {
         "goal_completion_rate": report.engine_completion_rate,
-        # Not computed yet: needs the constraint scoring fix (Fix 6).
-        "constraint_violations": None,
+        "constraint_violations": compute_constraint_violations(run_dir),
         "runtime_timesteps": int(summary.get("timesteps", 0)),
         "condition": condition,
         "challenge_task": challenge_task,

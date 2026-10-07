@@ -167,3 +167,15 @@
 **Alternatives considered:** A hook that prompts at session end (not added; the CLAUDE.md rule is simpler).
 
 **Affects:** `CLAUDE.md`, `notes/DECISIONS.md`.
+
+## [2026-10-07] Switch significance testing from paired to unpaired; confirm ML-092 empirically
+
+**Context:** `docs/metrics.md`'s Statistics section specified a paired significance test (e.g. paired t-test), which assumes running "seed s" under condition A and condition B holds the same underlying randomness constant between them. ML-092 (seed non-reproducibility) was flagged as a risk in CLAUDE.md but not yet checked directly.
+
+**Decision:** Switch to an unpaired (two-sample) test (e.g. Welch's t-test, or Mann-Whitney U if distributions look non-normal), and plan more seeds per condition than a paired design would have needed to recover lost power. No fixed seed count set yet — to be sized with a power analysis once a target effect size is chosen.
+
+**Rationale:** Confirmed empirically, not just asserted from the audit, at two levels once API access allowed it: (1) an isolated structured LLM call (`gpt-4o-mini`, `temperature=0`, `seed=42`, identical prompt, nothing else running) produced 5 different outputs in 5 repeated calls; (2) a full real scenario run (`marketing_campaign`, random manager, 10 timesteps, identical seed/scenario/model) repeated twice diverged in its manager-action sequence by step 8 and ended with a different total task count (52 vs. 53). "Same seed" does not mean "same underlying randomness" for this project's LLM-driven runs, so a paired test's core assumption doesn't hold — applying one anyway would not just lose power, it risks overstating significance.
+
+**Alternatives considered:** Attempt a code-level fix to force determinism (rejected: the divergence originates in the LLM provider's own sampling, not in anything MA-Gym's code controls — out of scope per the project's own Fix 5 plan, which treated this as the fallback path precisely for this outcome). Keep the paired design and hope the noise averages out (rejected: the test's validity, not just its power, depends on the pairing assumption holding).
+
+**Affects:** `docs/metrics.md` (Statistics section), `external/manager_agent_gym/fixes/PROPOSED_FIXES_SUMMARY.md` (Fix 5), all future comparative experiments (Phase 1 baseline reproduction onward) — the seed-count target for those experiments is not yet fixed and needs a power analysis before the real runs begin.
