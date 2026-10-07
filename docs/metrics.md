@@ -19,7 +19,29 @@
 
 ## Statistics
 
-Statistics: each challenge task is run across multiple seeds/workflow instantiations per condition; results reported as **mean ± standard error, with significance tested** (e.g. paired t-test) between method and baseline before any performance claim is made.
+Statistics: each challenge task is run across multiple seeds/workflow
+instantiations per condition; results reported as **mean ± standard error,
+with significance tested** between method and baseline before any
+performance claim is made.
+
+**Use an unpaired (two-sample) test, not a paired one** (e.g. Welch's t-test,
+or Mann-Whitney U if score distributions look non-normal). A paired design
+was the original plan, on the assumption that running condition A and
+condition B under "the same seed" holds the underlying randomness constant
+between them, reducing variance. Empirically confirmed this does not hold
+(MA-Gym audit ML-092; see `external/manager_agent_gym/fixes/PROPOSED_FIXES_SUMMARY.md`,
+Fix 5): the same seed, same model, same temperature=0, same prompt, with
+nothing else running, produced 5 different outputs in 5 calls at the
+isolated-LLM-call level; a full 10-step scenario run repeated with identical
+seed/scenario/model diverged by step 8 and ended with a different task count
+(52 vs. 53). "Seed s for condition A" and "seed s for condition B" are not
+shared-randomness pairs — they are two independent draws that happen to
+carry the same label. Applying a paired test to data like that doesn't just
+lose power, it can understate variance and overstate significance, since the
+test's assumptions (correlated pairs) don't hold. Plan more seeds per
+condition than a paired design would have needed, to recover power lost by
+giving up pairing — no fixed target seed count is set yet; size it with a
+power analysis once a target effect size is chosen.
 
 ## Logging Schema
 
@@ -48,8 +70,33 @@ metrics.json:
   do not reduce verified_completion_rate (currently: template_resource, a
   deliverable named as a template).
 
-constraint_violations is null until the constraint scoring fix (Fix 6) lands;
-src/eval/run_metrics.py writes null rather than an unreliable engine figure.
+constraint_violations is computed by src/eval/run_metrics.py's
+compute_constraint_violations, not read from the engine's own
+aggregated_score: MA-Gym's ValidationEngine always falls back to a
+hardcoded weighted-by-max formula whenever an evaluator has any rubric
+results, silently ignoring whatever aggregation strategy was actually
+declared (confirmed on a real ICAAP run — the built-in
+constraint_adherence evaluator declares a hard-constraint zeroing gate,
+hard_zero_agg, that never runs; the engine reported 0.0722 despite a
+violated hard constraint, where the declared strategy would have scored
+0.0 — see src/eval/constraint_aggregation.py and
+tests/test_constraint_aggregation.py). It is null only when no evaluation
+output exists for the run at all (e.g. evaluation was disabled) or the
+named evaluator didn't run — never a silently-wrong number. When present,
+shape:
+- by_rubric_violated (dict[str, bool]) — one entry per rubric in the
+  constraint_adherence evaluator group, true if it scored under its max
+- violation_count (int) — count of the above
+- correctly_aggregated_score (float) — the group's score under its actual
+  declared aggregation (currently: hard_zero_agg's semantics — zero if
+  hard_constraints_enforced scored 0, else the mean of every rubric)
+- engine_reported_score (float | None) — MA-Gym's own (weighted-by-max)
+  figure for the same group, kept for comparison
+
+Scope note: "by constraint type" above currently means "by rubric name
+within MA-Gym's built-in constraint_adherence evaluator" — this project has
+not yet defined its own scenario-specific constraints (Phase 2/3 not
+started); revisit this shape once it does.
 
 This schema is the contract between src/eval/ and experiments/results/ —
 any new metric must be added here before being logged.
